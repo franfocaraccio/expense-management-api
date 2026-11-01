@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using ExpenseManagement.Api.Infrastructure;
 using ExpenseManagement.Api.Services;
+using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using MongoDB.Bson;
 using MongoDB.Driver;
@@ -41,7 +42,23 @@ builder.Services.AddSwaggerGen(options =>
     options.IncludeXmlComments(Path.Combine(AppContext.BaseDirectory, "ExpenseManagement.Api.xml"));
 });
 
+builder.Services.AddTransient<DataSeeder>();
+
 var app = builder.Build();
+
+// Create indexes (idempotent) and seed sample data before accepting requests.
+await using (var scope = app.Services.CreateAsyncScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<MongoDbContext>();
+    var settings = scope.ServiceProvider.GetRequiredService<IOptions<MongoDbSettings>>().Value;
+
+    await MongoIndexes.CreateAsync(context);
+
+    if (settings.SeedData)
+    {
+        await scope.ServiceProvider.GetRequiredService<DataSeeder>().SeedAsync(settings.SeedExpenseCount);
+    }
+}
 
 app.UseExceptionHandler();
 
