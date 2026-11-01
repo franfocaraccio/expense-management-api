@@ -9,6 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\ExpenseManagement.Api\ExpenseManagement.Api.csproj" />
   </ItemGroup>
 
