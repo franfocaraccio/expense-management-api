@@ -10,6 +10,8 @@ services:
     volumes:
       - mongo-data:/data/db
       - mongo-config:/data/configdb
+      # Example scripts, available inside the container: load("/scripts/explain-examples.js")
+      - ./scripts/mongo:/scripts:ro
     healthcheck:
       # Initiates the replica set on first start (rs.status() throws until then) and
       # reports healthy only once this node has been elected PRIMARY and accepts writes.
