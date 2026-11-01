@@ -36,14 +36,13 @@ public class UsersController(UserService userService, ExpenseService expenseServ
     public async Task<ActionResult<UserDto>> Update(string id, UpdateUserRequest request, CancellationToken ct)
         => Ok(await userService.UpdateAsync(id, request, ct));
 
+    /// <summary>
+    /// Deletes the user and all of their expenses atomically (multi-document transaction).
+    /// </summary>
     [HttpDelete("{id:objectid}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Delete(string id, CancellationToken ct)
-    {
-        await userService.DeleteAsync(id, ct);
-        return NoContent();
-    }
+    public async Task<ActionResult<DeleteUserResult>> Delete(string id, CancellationToken ct)
+        => Ok(await userService.DeleteAsync(id, ct));
 
     /// <summary>
     /// Expenses of a user, with optional category and date filters, sorting and paging.

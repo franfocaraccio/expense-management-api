@@ -88,13 +88,48 @@ public class UserService(MongoDbContext context)
         return await GetByIdAsync(id, ct);
     }
 
-    public async Task DeleteAsync(string id, CancellationToken ct)
+    /// <summary>
+    /// Deletes a user and all of their expenses in a multi-document transaction.
+    ///
+    /// MongoDB has no ON DELETE CASCADE. A single-document write is always atomic, but here
+    /// we touch two collections: without a transaction a failure in the middle could leave
+    /// the user deleted and orphan expenses behind (or the other way round).
+    ///
+    /// Transactions require a replica set (or sharded cluster) because they are built on the
+    /// oplog and on snapshot reads; that is why docker-compose starts MongoDB with --replSet.
+    /// </summary>
+    public async Task<DeleteUserResult> DeleteAsync(string id, CancellationToken ct)
     {
-        var result = await _users.DeleteOneAsync(Builders<User>.Filter.Eq(u => u.Id, id), ct);
-        if (result.DeletedCount == 0)
-        {
-            throw new NotFoundException($"User '{id}' was not found.");
-        }
+        // A session is the MongoDB equivalent of a connection with an open SqlTransaction.
+        using var session = await context.Client.StartSessionAsync(cancellationToken: ct);
+
+        // WithTransactionAsync starts the transaction, runs the callback, commits, and
+        // retries the whole callback on transient errors (e.g. a write conflict or a
+        // primary election). Any exception thrown inside aborts (rolls back) the transaction.
+        var deletedExpenses = await session.WithTransactionAsync(
+            async (s, token) =>
+            {
+                // Every operation must receive the session, otherwise it runs OUTSIDE the transaction.
+                var userResult = await _users.DeleteOneAsync(
+                    s, Builders<User>.Filter.Eq(u => u.Id, id), cancellationToken: token);
+
+                if (userResult.DeletedCount == 0)
+                {
+                    throw new NotFoundException($"User '{id}' was not found.");
+                }
+
+                var expensesResult = await context.Expenses.DeleteManyAsync(
+                    s, Builders<Expense>.Filter.Eq(e => e.UserId, id), cancellationToken: token);
+
+                return expensesResult.DeletedCount;
+            },
+            new TransactionOptions(
+                readConcern: ReadConcern.Snapshot,
+                // "majority": the commit is acknowledged once replicated to most members.
+                writeConcern: WriteConcern.WMajority),
+            ct);
+
+        return new DeleteUserResult(id, deletedExpenses);
     }
 
     public async Task EnsureExistsAsync(string id, CancellationToken ct)

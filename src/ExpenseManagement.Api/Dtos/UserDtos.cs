@@ -12,6 +12,8 @@ public record CreateUserRequest(
     [Required, StringLength(100, MinimumLength = 1)] string Name,
     [Required, EmailAddress, StringLength(200)] string Email);
 
+public record DeleteUserResult(string UserId, long DeletedExpenses);
+
 public record UpdateUserRequest(
     [Required, StringLength(100, MinimumLength = 1)] string Name,
     [Required, EmailAddress, StringLength(200)] string Email);
