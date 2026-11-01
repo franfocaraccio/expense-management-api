@@ -1,0 +1,51 @@
+services:
+  mongo:
+    image: mongo:8.0
+    container_name: expense-mongo
+    # Transactions require a replica set (they rely on the oplog), so even locally
+    # MongoDB runs as a single-node replica set named "rs0".
+    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27017"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+      - mongo-config:/data/configdb
+    healthcheck:
+      # Initiates the replica set on first start (rs.status() throws until then) and
+      # reports healthy only once this node has been elected PRIMARY and accepts writes.
+      # The member host is "mongo:27017", the name other containers use to reach it.
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - >-
+          try { rs.status() } catch (e) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }) };
+          quit(db.hello().isWritablePrimary ? 0 : 1)
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: src/ExpenseManagement.Api/Dockerfile
+    container_name: expense-api
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      # Inside the Docker network the API uses replica set discovery with the service name.
+      MongoDb__ConnectionString: mongodb://mongo:27017/?replicaSet=rs0
+      MongoDb__DatabaseName: expense_management
+      MongoDb__SeedData: "true"
+      MongoDb__SeedExpenseCount: "50000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+volumes:
+  # Named volumes survive "docker compose down"; use "docker compose down -v" to reset the data.
+  mongo-data:
+  mongo-config:
