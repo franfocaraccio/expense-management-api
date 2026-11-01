@@ -1,4 +1,7 @@
+using System.Text.Json.Serialization;
 using ExpenseManagement.Api.Infrastructure;
+using ExpenseManagement.Api.Services;
+using Microsoft.OpenApi.Models;
 using MongoDB.Bson;
 using MongoDB.Driver;
 
@@ -13,11 +16,34 @@ builder.Services.AddOptions<MongoDbSettings>()
 // Singleton: MongoClient manages its own connection pool (see MongoDbContext).
 builder.Services.AddSingleton<MongoDbContext>();
 
-builder.Services.AddControllers();
+// Services are stateless and only hold collection references, so scoped is enough.
+builder.Services.AddScoped<UserService>();
+builder.Services.AddScoped<CategoryService>();
+builder.Services.AddScoped<ExpenseService>();
+
+builder.Services.Configure<RouteOptions>(options =>
+    options.ConstraintMap.Add("objectid", typeof(ObjectIdRouteConstraint)));
+
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+
+builder.Services.AddControllers()
+    .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "Expense Management API",
+        Version = "v1",
+        Description = "Reference project: MongoDB 8 with the official .NET driver."
+    });
+    options.IncludeXmlComments(Path.Combine(AppContext.BaseDirectory, "ExpenseManagement.Api.xml"));
+});
 
 var app = builder.Build();
+
+app.UseExceptionHandler();
 
 // Swagger is always enabled so the API can be explored in any environment.
 app.UseSwagger();
