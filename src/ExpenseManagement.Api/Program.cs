@@ -21,6 +21,7 @@ builder.Services.AddSingleton<MongoDbContext>();
 builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<CategoryService>();
 builder.Services.AddScoped<ExpenseService>();
+builder.Services.AddScoped<ReportService>();
 
 builder.Services.Configure<RouteOptions>(options =>
     options.ConstraintMap.Add("objectid", typeof(ObjectIdRouteConstraint)));

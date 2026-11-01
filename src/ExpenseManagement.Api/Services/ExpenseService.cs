@@ -2,6 +2,7 @@
 using ExpenseManagement.Api.Dtos;
 using ExpenseManagement.Api.Infrastructure;
 using ExpenseManagement.Api.Models;
+using MongoDB.Bson;
 using MongoDB.Driver;
 
 namespace ExpenseManagement.Api.Services;
@@ -35,6 +36,74 @@ public class ExpenseService(MongoDbContext context, UserService userService, Cat
     public async Task<ExpenseDto> GetByIdAsync(string id, CancellationToken ct)
     {
         return ExpenseDto.From(await GetDocumentAsync(id, ct));
+    }
+
+    /// <summary>
+    /// Same search as SearchAsync, but each expense includes its user and category,
+    /// resolved on the server with $lookup (the MongoDB version of a LEFT JOIN).
+    /// The typed fluent API ($match, $sort, $skip, $limit) is combined with raw BSON stages.
+    /// </summary>
+    public async Task<PagedResult<ExpenseDetailsDto>> SearchWithDetailsAsync(ExpenseQuery query, CancellationToken ct)
+    {
+        var filter = BuildFilter(query);
+        var sort = query.Sort == SortOrder.Asc
+            ? Builders<Expense>.Sort.Ascending(e => e.Date)
+            : Builders<Expense>.Sort.Descending(e => e.Date);
+
+        var total = await _expenses.CountDocumentsAsync(filter, cancellationToken: ct);
+
+        // Paginate BEFORE the $lookup: only PageSize documents are joined, not the whole collection.
+        var items = await AppendDetailsStages(
+                _expenses.Aggregate()
+                    .Match(filter)
+                    .Sort(sort)
+                    .Skip(query.Skip)
+                    .Limit(query.PageSize))
+            .ToListAsync(ct);
+
+        return new PagedResult<ExpenseDetailsDto>(items, query.Page, query.PageSize, total);
+    }
+
+    public async Task<ExpenseDetailsDto> GetWithDetailsAsync(string id, CancellationToken ct)
+    {
+        return await AppendDetailsStages(_expenses.Aggregate().Match(e => e.Id == id)).FirstOrDefaultAsync(ct)
+               ?? throw new NotFoundException($"Expense '{id}' was not found.");
+    }
+
+    /// <summary>
+    /// mongosh equivalent:
+    /// { $lookup: { from: "users", localField: "userId", foreignField: "_id",
+    ///              pipeline: [ { $project: { name: 1, email: 1 } } ], as: "user" } },
+    /// { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } }, ...
+    /// </summary>
+    private static IAggregateFluent<ExpenseDetailsDto> AppendDetailsStages(IAggregateFluent<Expense> aggregate)
+    {
+        return aggregate
+            .AppendStage<BsonDocument>(Lookup(MongoDbContext.UsersCollection, "userId", "user", "name", "email"))
+            .AppendStage<BsonDocument>(Unwind("$user"))
+            .AppendStage<BsonDocument>(Lookup(MongoDbContext.CategoriesCollection, "categoryId", "category", "name"))
+            .AppendStage<BsonDocument>(Unwind("$category"))
+            // The ids are now inside user / category, so the top-level references are dropped.
+            .AppendStage<ExpenseDetailsDto>(new BsonDocument("$project", new BsonDocument
+            {
+                { "userId", 0 },
+                { "categoryId", 0 }
+            }));
+
+        static BsonDocument Lookup(string from, string localField, string alias, params string[] fields) =>
+            new("$lookup", new BsonDocument
+            {
+                { "from", from },
+                { "localField", localField },
+                { "foreignField", "_id" },
+                // Only bring the fields we need from the joined collection.
+                { "pipeline", new BsonArray { new BsonDocument("$project", new BsonDocument(fields.Select(f => new BsonElement(f, 1)))) } },
+                { "as", alias }
+            });
+
+        // preserveNullAndEmptyArrays: keep the expense even if the referenced document is missing.
+        static BsonDocument Unwind(string path) =>
+            new("$unwind", new BsonDocument { { "path", path }, { "preserveNullAndEmptyArrays", true } });
     }
 
     public async Task<ExpenseDto> CreateAsync(SaveExpenseRequest request, CancellationToken ct)

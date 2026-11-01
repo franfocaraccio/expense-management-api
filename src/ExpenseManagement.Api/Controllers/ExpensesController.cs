@@ -23,6 +23,22 @@ public class ExpensesController(ExpenseService expenseService) : ControllerBase
     public async Task<ActionResult<ExpenseDto>> GetById(string id, CancellationToken ct)
         => Ok(await expenseService.GetByIdAsync(id, ct));
 
+    /// <summary>
+    /// Same filters as the search, but each expense embeds its user and category,
+    /// resolved with $lookup in an aggregation pipeline.
+    /// </summary>
+    [HttpGet("details")]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<PagedResult<ExpenseDetailsDto>>> SearchWithDetails(
+        [FromQuery] ExpenseQuery query, CancellationToken ct)
+        => Ok(await expenseService.SearchWithDetailsAsync(query, ct));
+
+    /// <summary>One expense with its user and category ($lookup).</summary>
+    [HttpGet("{id:objectid}/details")]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ExpenseDetailsDto>> GetWithDetails(string id, CancellationToken ct)
+        => Ok(await expenseService.GetWithDetailsAsync(id, ct));
+
     /// <summary>Creates an expense after checking that the user and the category exist.</summary>
     [HttpPost]
     [ProducesResponseType(StatusCodes.Status201Created)]
